@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SimCity 2D</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body, html {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: monospace;
+    }
+
+    #grid-canvas {
+      display: block;
+      position: fixed;
+      top: 0; left: 0;
+      cursor: crosshair;
+    }
+
+    /* ── HUD panels ── */
+    #hud-stats {
+      position: fixed;
+      top: 16px; left: 16px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 10px 16px;
+      color: #eee;
+      font-size: 0.8rem;
+      line-height: 1.8;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+    }
+    #hud-stats .city-name { font-size: 1rem; font-weight: bold; color: #fff; letter-spacing: 1px; }
+
+    #hud-tile {
+      position: fixed;
+      top: 16px; right: 16px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 8px 14px;
+      color: #aaa;
+      font-size: 0.78rem;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+    }
+
+    /* ── Toolbar ── */
+    #toolbar {
+      position: fixed;
+      bottom: 24px; left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: rgba(10,10,30,0.75);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 20px;
+      padding: 10px 18px;
+      backdrop-filter: blur(10px);
+    }
+
+    .tool-btn {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      background: rgba(255,255,255,0.07);
+      border: 2px solid transparent;
+      border-radius: 12px;
+      padding: 8px 14px;
+      cursor: pointer;
+      color: #ccc;
+      font-family: monospace;
+      font-size: 0.72rem;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    }
+    .tool-btn .swatch { width: 18px; height: 18px; border-radius: 4px; }
+    .tool-btn:hover   { background: rgba(255,255,255,0.14); transform: translateY(-2px); }
+    .tool-btn.selected {
+      border-color: rgba(255,255,255,0.8);
+      background: rgba(255,255,255,0.18);
+      transform: translateY(-4px);
+      color: #fff;
+    }
+    .tool-btn .key-hint { font-size: 0.6rem; color: rgba(255,255,255,0.35); }
+
+    /* New map button sits separately on the right side */
+    #btn-newmap {
+      position: fixed;
+      bottom: 24px; right: 24px;
+      background: rgba(10,10,30,0.75);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 12px;
+      padding: 10px 16px;
+      color: #ccc;
+      font-family: monospace;
+      font-size: 0.78rem;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: background 0.15s;
+    }
+    #btn-newmap:hover { background: rgba(255,255,255,0.15); color: #fff; }
+  </style>
+</head>
+<body>
+
+  <canvas id="grid-canvas"></canvas>
+
+  <div id="hud-stats">
+    <div class="city-name">MY CITY</div>
+    <div>Grid: <span id="stat-size">—</span></div>
+    <div>Tool: <span id="stat-tool">Erase</span></div>
+  </div>
+
+  <div id="hud-tile">Hover a tile</div>
+
+  <div id="toolbar"></div>
+
+  <button id="btn-newmap">New Map [R]</button>
+
+<script>
+
+// ═══════════════════════════════════════════════════════════
+//  CONFIGURATION
+// ═══════════════════════════════════════════════════════════
+
+const TILE_SIZE  = 24;
+const NOISE_SCALE = 8;  // control-point spacing in tiles — smaller = bumpier terrain
+
+let COLS = Math.floor(window.innerWidth  / TILE_SIZE);
+let ROWS = Math.floor(window.innerHeight / TILE_SIZE);
+
+
+// ═══════════════════════════════════════════════════════════
+//  TERRAIN DEFINITIONS
+//
+//  Each terrain has:
+//    color     — base tile color
+//    label     — display name
+//    buildable — whether the player can place zones here
+// ═══════════════════════════════════════════════════════════
+
+const TERRAIN = {
+  water:    { color: '#1a5276', label: 'Water',    buildable: false },
+  sand:     { color: '#d4ac6e', label: 'Beach',    buildable: true  },
+  grass:    { color: '#2e7d32', label: 'Grass',    buildable: true  },
+  forest:   { color: '#1b4d1e', label: 'Forest',   buildable: true  },
+  mountain: { color: '#616161', label: 'Mountain', buildable: false },
+};
+
+
+// ═══════════════════════════════════════════════════════════
+//  ZONE DEFINITIONS  (painted on top of terrain)
+// ═══════════════════════════════════════════════════════════
+
+const ZONES = {
+  empty:       { color: null,      label: 'Erase',       key: '1' },
+  residential: { color: '#4caf50', label: 'Residential', key: '2' },
+  commercial:  { color: '#2196f3', label: 'Commercial',  key: '3' },
+  industrial:  { color: '#ff9800', label: 'Industrial',  key: '4' },
+  road:        { color: '#9e9e9e', label: 'Road',        key: '5' },
+};
+
+
+// ═══════════════════════════════════════════════════════════
+//  VALUE NOISE  — the terrain generator
+//
+//  Goal: produce a smooth float 0..1 for every (row, col).
+//  Strategy:
+//    1. Seed a coarse grid of random values (control points)
+//    2. For each tile, bilinearly interpolate the 4 surrounding points
+//    3. Run the interpolation weight through smoothstep so edges
+//       ease in/out rather than looking linear
+// ═══════════════════════════════════════════════════════════
+
+// Smoothstep: maps 0..1 → 0..1 along an S-curve.
+//   At t=0 and t=1 the slope is 0 (smooth start/end).
+//   Without this, bilinear interpolation looks grid-shaped.
+//
+//   Formula: 3t² - 2t³  (Ken Perlin's original)
+function smoothstep(t) {
+  return t * t * (3 - 2 * t);
+}
+
+// Linear interpolation: blend from a to b by fraction t (0=a, 1=b).
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+// Generate a 2-D array of random floats for the coarse control grid.
+// We need one extra column/row so every tile has a full 4-corner cell.
+function makeControlGrid(rows, cols, scale) {
+  const cw = Math.ceil(cols / scale) + 1;
+  const ch = Math.ceil(rows / scale) + 1;
+  return Array.from({ length: ch }, () =>
+    Array.from({ length: cw }, () => Math.random())
+  );
+}
+
+// Given a control grid, sample the smooth noise value at tile (r, c).
+function sampleNoise(control, r, c, scale) {
+  // Position within the control grid (fractional)
+  const cx = c / scale;
+  const cy = r / scale;
+
+  // Integer cell coordinates (top-left control point)
+  const x0 = Math.floor(cx);
+  const y0 = Math.floor(cy);
+  const x1 = x0 + 1;
+  const y1 = y0 + 1;
+
+  // Fractional position within this cell (0..1)
+  // smoothstep turns the raw fraction into an S-curve weight
+  const tx = smoothstep(cx - x0);
+  const ty = smoothstep(cy - y0);
+
+  // Read the 4 surrounding control-point values
+  //   (y0,x0) ── (y0,x1)
+  //      │    tile  │
+  //   (y1,x0) ── (y1,x1)
+  const v00 = control[y0][x0];
+  const v10 = control[y0][x1];
+  const v01 = control[y1][x0];
+  const v11 = control[y1][x1];
+
+  // Bilinear interpolation:
+  //   first interpolate along the top edge, then the bottom edge,
+  //   then interpolate vertically between those two results.
+  const top    = lerp(v00, v10, tx);
+  const bottom = lerp(v01, v11, tx);
+  return lerp(top, bottom, ty);
+}
+
+// Map a noise value (0..1) to a terrain type.
+// Thresholds are tunable — push water higher for a lake-heavy map.
+function noiseToTerrain(v) {
+  if (v < 0.30) return 'water';
+  if (v < 0.38) return 'sand';
+  if (v < 0.70) return 'grass';
+  if (v < 0.82) return 'forest';
+  return 'mountain';
+}
+
+// Build the full terrain map for the current grid size.
+function generateTerrain(rows, cols) {
+  const control = makeControlGrid(rows, cols, NOISE_SCALE);
+  return Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) =>
+      noiseToTerrain(sampleNoise(control, r, c, NOISE_SCALE))
+    )
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  GAME STATE
+// ═══════════════════════════════════════════════════════════
+
+let terrain = generateTerrain(ROWS, COLS);  // terrain[row][col] — never changes mid-game
+
+// zones[row][col] = zone string ('empty' by default)
+// Separate from terrain so we can save/load them independently
+let zones = Array.from({ length: ROWS }, () => Array(COLS).fill('empty'));
+
+
+// ═══════════════════════════════════════════════════════════
+//  CANVAS
+// ═══════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('grid-canvas');
+const ctx    = canvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+
+
+// ═══════════════════════════════════════════════════════════
+//  DRAWING
+//
+//  Layer order:
+//    1. Terrain color (always visible)
+//    2. Zone color (painted on top when not 'empty')
+//    3. Grid border lines
+// ═══════════════════════════════════════════════════════════
+
+function drawGrid() {
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const x = col * TILE_SIZE;
+      const y = row * TILE_SIZE;
+
+      // ── Layer 1: terrain base ──
+      ctx.fillStyle = TERRAIN[terrain[row][col]].color;
+      ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+
+      // ── Layer 2: zone overlay ──
+      // Only draw if a zone has been placed (not 'empty').
+      // We paint at 85% opacity so a hint of terrain shows through.
+      const zone = zones[row][col];
+      if (zone !== 'empty') {
+        ctx.globalAlpha = 0.85;
+        ctx.fillStyle   = ZONES[zone].color;
+        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+        ctx.globalAlpha = 1.0;   // reset — always reset globalAlpha after using it
+      }
+
+      // ── Layer 3: grid border ──
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+      ctx.lineWidth   = 0.5;
+      ctx.strokeRect(x + 0.5, y + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
+    }
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//  TOOLBAR
+// ═══════════════════════════════════════════════════════════
+
+let activeTool = 'empty';
+
+const toolbar = document.getElementById('toolbar');
+
+Object.entries(ZONES).forEach(([zoneKey, zone]) => {
+  const btn = document.createElement('button');
+  btn.className    = 'tool-btn' + (zoneKey === 'empty' ? ' selected' : '');
+  btn.dataset.zone = zoneKey;
+
+  const swatchColor = zone.color ?? '#2d2d44';  // erase shows a dark swatch
+  btn.innerHTML = `
+    <div class="swatch" style="background:${swatchColor}"></div>
+    ${zone.label}
+    <span class="key-hint">[${zone.key}]</span>
+  `;
+  btn.addEventListener('click', () => selectTool(zoneKey));
+  toolbar.appendChild(btn);
+});
+
+function selectTool(zoneKey) {
+  activeTool = zoneKey;
+  document.querySelectorAll('.tool-btn').forEach(b =>
+    b.classList.toggle('selected', b.dataset.zone === zoneKey)
+  );
+  document.getElementById('stat-tool').textContent = ZONES[zoneKey].label;
+}
+
+window.addEventListener('keydown', e => {
+  const match = Object.entries(ZONES).find(([, z]) => z.key === e.key);
+  if (match) selectTool(match[0]);
+  if (e.key === 'r' || e.key === 'R') newMap();
+});
+
+
+// ═══════════════════════════════════════════════════════════
+//  MOUSE INTERACTION
+// ═══════════════════════════════════════════════════════════
+
+let isMouseDown = false;
+
+function pixelToTile(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    col: Math.floor((clientX - rect.left) / TILE_SIZE),
+    row: Math.floor((clientY - rect.top)  / TILE_SIZE),
+  };
+}
+
+function inBounds(row, col) {
+  return row >= 0 && row < ROWS && col >= 0 && col < COLS;
+}
+
+function paintTile(clientX, clientY) {
+  const { row, col } = pixelToTile(clientX, clientY);
+  if (!inBounds(row, col)) return;
+
+  // Terrain restriction: can't build on water or mountain
+  const t = terrain[row][col];
+  if (!TERRAIN[t].buildable && activeTool !== 'empty') return;
+
+  zones[row][col] = activeTool;
+  drawGrid();
+}
+
+canvas.addEventListener('mousedown', e => { isMouseDown = true;  paintTile(e.clientX, e.clientY); });
+canvas.addEventListener('mousemove', e => {
+  if (isMouseDown) paintTile(e.clientX, e.clientY);
+
+  const { row, col } = pixelToTile(e.clientX, e.clientY);
+  if (inBounds(row, col)) {
+    const t = terrain[row][col];
+    const z = zones[row][col];
+    const canBuild = TERRAIN[t].buildable ? '' : ' ⛔';
+    document.getElementById('hud-tile').textContent =
+      `(${col}, ${row})  ${TERRAIN[t].label}${canBuild}` +
+      (z !== 'empty' ? `  [${ZONES[z].label}]` : '');
+  }
+});
+window.addEventListener('mouseup', () => { isMouseDown = false; });
+
+
+// ═══════════════════════════════════════════════════════════
+//  NEW MAP
+//  Regenerates terrain and wipes all placed zones.
+// ═══════════════════════════════════════════════════════════
+
+function newMap() {
+  terrain = generateTerrain(ROWS, COLS);
+  zones   = Array.from({ length: ROWS }, () => Array(COLS).fill('empty'));
+  drawGrid();
+}
+
+document.getElementById('btn-newmap').addEventListener('click', newMap);
+
+
+// ═══════════════════════════════════════════════════════════
+//  WINDOW RESIZE
+// ═══════════════════════════════════════════════════════════
+
+window.addEventListener('resize', () => {
+  const newCols = Math.floor(window.innerWidth  / TILE_SIZE);
+  const newRows = Math.floor(window.innerHeight / TILE_SIZE);
+
+  // Expand zones array if window grew
+  while (zones.length < newRows) zones.push(Array(newCols).fill('empty'));
+  zones.forEach(row => { while (row.length < newCols) row.push('empty'); });
+
+  // Terrain: regenerate only the newly revealed border tiles
+  // (simpler than patching — just regenerate the whole thing)
+  if (newCols > COLS || newRows > ROWS) {
+    terrain = generateTerrain(newRows, newCols);
+  }
+
+  COLS = newCols;
+  ROWS = newRows;
+  resizeCanvas();
+  document.getElementById('stat-size').textContent = `${COLS}×${ROWS}`;
+  drawGrid();
+});
+
+
+// ═══════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════
+
+document.getElementById('stat-size').textContent = `${COLS}×${ROWS}`;
+drawGrid();
+
+</script>
+</body>
+</html>
