@@ -23,7 +23,7 @@
     /* ── HUD panels ── */
     #hud-stats {
       position: fixed;
-      top: 16px; left: 16px;
+      top: 25px; left: 25px;
       background: rgba(0,0,0,0.55);
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
@@ -38,13 +38,13 @@
 
     #hud-tile {
       position: fixed;
-      top: 16px; right: 16px;
+      top: 25px; right: 25px;
       background: rgba(0,0,0,0.55);
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 10px;
       padding: 8px 14px;
       color: #aaa;
-      font-size: 0.78rem;
+      font-size: 0.9rem;
       pointer-events: none;
       backdrop-filter: blur(6px);
     }
@@ -73,7 +73,7 @@
       cursor: pointer;
       color: #ccc;
       font-family: monospace;
-      font-size: 0.72rem;
+      font-size: 0.8rem;
       transition: background 0.15s, border-color 0.15s, transform 0.1s;
     }
     .tool-btn .swatch { width: 18px; height: 18px; border-radius: 4px; }
@@ -84,7 +84,7 @@
       transform: translateY(-4px);
       color: #fff;
     }
-    .tool-btn .key-hint { font-size: 0.6rem; color: rgba(255,255,255,0.35); }
+    .tool-btn .key-hint { font-size: 0.7rem; color: rgba(255,255,255,0.35); }
 
     /* New map button sits separately on the right side */
     #btn-newmap {
@@ -96,12 +96,31 @@
       padding: 10px 16px;
       color: #ccc;
       font-family: monospace;
-      font-size: 0.78rem;
+      font-size: 0.9rem;
       cursor: pointer;
       backdrop-filter: blur(10px);
       transition: background 0.15s;
     }
     #btn-newmap:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+    /* ── Toast notification ── */
+    #toast {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(180, 30, 30, 0.85);
+      border: 1px solid rgba(255, 100, 100, 0.4);
+      border-radius: 12px;
+      padding: 12px 24px;
+      color: #fff;
+      font-size: 0.9rem;
+      pointer-events: none;
+      backdrop-filter: blur(8px);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    #toast.visible { opacity: 1; }
   </style>
 </head>
 <body>
@@ -112,6 +131,8 @@
     <div class="city-name">MY CITY</div>
     <div>Grid: <span id="stat-size">—</span></div>
     <div>Tool: <span id="stat-tool">Erase</span></div>
+    <div>Population: <span id="population">0</span></div>
+    <div>Money: $<span id="money">0</span></div>
   </div>
 
   <div id="hud-tile">Hover a tile</div>
@@ -120,17 +141,22 @@
 
   <button id="btn-newmap">New Map [R]</button>
 
+  <div id="toast"></div>
+
 <script>
 
 // ═══════════════════════════════════════════════════════════
 //  CONFIGURATION
 // ═══════════════════════════════════════════════════════════
 
-const TILE_SIZE  = 24;
+const TILE_SIZE  = 44;
 const NOISE_SCALE = 8;  // control-point spacing in tiles — smaller = bumpier terrain
 
 let COLS = Math.floor(window.innerWidth  / TILE_SIZE);
 let ROWS = Math.floor(window.innerHeight / TILE_SIZE);
+
+let population = 0;
+let money = 1000;
 
 
 // ═══════════════════════════════════════════════════════════
@@ -156,11 +182,11 @@ const TERRAIN = {
 // ═══════════════════════════════════════════════════════════
 
 const ZONES = {
-  empty:       { color: null,      label: 'Erase',       key: '1' },
-  residential: { color: '#4caf50', label: 'Residential', key: '2' },
-  commercial:  { color: '#2196f3', label: 'Commercial',  key: '3' },
-  industrial:  { color: '#ff9800', label: 'Industrial',  key: '4' },
-  road:        { color: '#9e9e9e', label: 'Road',        key: '5' },
+  empty:       { color: null,      label: 'Erase',       key: '1' , cost: 0},
+  residential: { color: '#4caf50', label: 'Residential', key: '2' , cost: 100 },
+  commercial:  { color: '#2196f3', label: 'Commercial',  key: '3' , cost: 200 },
+  industrial:  { color: '#ff9800', label: 'Industrial',  key: '4' , cost: 150 },
+  road:        { color: '#9e9e9e', label: 'Road',        key: '5' , cost: 50 },
 };
 
 
@@ -202,7 +228,7 @@ function makeControlGrid(rows, cols, scale) {
 // Given a control grid, sample the smooth noise value at tile (r, c).
 function sampleNoise(control, r, c, scale) {
   // Position within the control grid (fractional)
-  const cx = c / scale;
+  const cx = c / scale; // e.g. with scale=8, tile 16 is at cx=2.0, tile 20 is at cx=2.5
   const cy = r / scale;
 
   // Integer cell coordinates (top-left control point)
@@ -213,7 +239,8 @@ function sampleNoise(control, r, c, scale) {
 
   // Fractional position within this cell (0..1)
   // smoothstep turns the raw fraction into an S-curve weight
-  const tx = smoothstep(cx - x0);
+  const tx = smoothstep(cx - x0); // cx - x0 is how far into the cell we are
+  // tx=0 at the left edge (x0), tx=1 at the right edge (x1), and smoothstep makes it ease in/out
   const ty = smoothstep(cy - y0);
 
   // Read the 4 surrounding control-point values
@@ -303,7 +330,11 @@ function drawGrid() {
       // We paint at 85% opacity so a hint of terrain shows through.
       const zone = zones[row][col];
       if (zone !== 'empty') {
-        ctx.globalAlpha = 0.85;
+        if (isConnectedToRoad(row, col)) {
+          ctx.globalAlpha = 0.85;
+        } else {
+          ctx.globalAlpha = 0.5; // dim unconnected zones to indicate they aren't functioning
+        }
         ctx.fillStyle   = ZONES[zone].color;
         ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
         ctx.globalAlpha = 1.0;   // reset — always reset globalAlpha after using it
@@ -362,6 +393,22 @@ window.addEventListener('keydown', e => {
 
 let isMouseDown = false;
 
+// showToast: displays a message in the center of the screen, then fades it out.
+// toastTimeout tracks any in-progress timer so a rapid second call resets it
+// instead of leaving two overlapping timers running.
+let toastTimeout = null;
+
+function showToast(message) {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.classList.add('visible');       // triggers the CSS opacity transition → fades in
+
+  clearTimeout(toastTimeout);           // cancel previous timer if toast was already showing
+  toastTimeout = setTimeout(() => {
+    toast.classList.remove('visible');  // triggers fade-out transition
+  }, 2000);                             // wait 2 seconds, then fade out
+}
+
 function pixelToTile(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -381,6 +428,26 @@ function paintTile(clientX, clientY) {
   // Terrain restriction: can't build on water or mountain
   const t = terrain[row][col];
   if (!TERRAIN[t].buildable && activeTool !== 'empty') return;
+
+  if (zones[row][col] === activeTool) {
+    return; // no change, so do nothing
+  }
+
+  if (ZONES[activeTool].cost > money) {
+    showToast('Not enough money!');
+    return;
+  }
+  
+  if (activeTool !== 'empty') {
+    money -= ZONES[activeTool].cost;
+    document.getElementById('money').textContent = money;
+  }
+
+  if (zones[row][col] !== 'empty') {
+    // Refund 75% of the cost of the existing zone when replacing it
+    money += ZONES[zones[row][col]].cost * 0.75; 
+    document.getElementById('money').textContent = money;
+  }
 
   zones[row][col] = activeTool;
   drawGrid();
@@ -447,8 +514,48 @@ window.addEventListener('resize', () => {
 //  INIT
 // ═══════════════════════════════════════════════════════════
 
+function simulateTick() {
+  let zoneCounts = {};
+   for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const zone = zones[row][col]
+      if (zone !== 'empty') {
+        if (isConnectedToRoad(row, col)) {
+          zoneCounts[zone] = (zoneCounts[zone] || 0) + 1;
+        }
+      }
+    }
+  }
+  population = (zoneCounts['residential'] || 0) * 10;  // each residential tile supports 10 people
+  money += (zoneCounts['commercial'] || 0) * 5;         // each commercial tile generates $5 per tick
+  money -= (zoneCounts['industrial'] || 0) * 3;         // each industrial tile costs $3 per tick to maintain  
+  if (money < 0) {
+    money = 0; // prevent negative money
+  }
+  document.getElementById('population').textContent = population;
+  document.getElementById('money').textContent = money;
+}
+
+function isConnectedToRoad(row, col) {
+  const neighbors = [
+    [row - 1, col],
+    [row + 1, col],
+    [row, col - 1],
+    [row, col + 1]
+  ];
+
+  for (const [r, c] of neighbors) {
+    if (inBounds(r, c) && zones[r][c] === 'road') {
+      return true;
+    }
+  }
+  return false;
+}
+
+
 document.getElementById('stat-size').textContent = `${COLS}×${ROWS}`;
 drawGrid();
+setInterval(simulateTick, 1000);
 
 </script>
 </body>
