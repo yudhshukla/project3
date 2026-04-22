@@ -1,0 +1,23 @@
+
+1. Set up a full-screen canvas grid for a 2D SimCity-style web game. The canvas should fill the entire browser window. Include a floating toolbar at the bottom center of the screen (Animal Crossing style) with zone placement tools: Erase, Residential, Commercial, Industrial, and Road. Add a small HUD panel in the top-left corner showing city stats, and a tile info panel in the top-right that updates on hover.
+
+2. Implement a procedural terrain generation system using value noise. When the map loads, generate smooth terrain across the grid with five terrain types: Water, Beach, Grass, Forest, and Mountain. Water and Mountain tiles should be unbuildable. Include a "New Map" button that regenerates the terrain. Explain how the noise algorithm works (smoothstep, lerp, bilinear interpolation, control grid).
+
+3. Help me implement (no code) a city simulation tick that runs every second. The tick should count how many of each zone type the player has placed and update population and money accordingly. Residential zones grow population, commercial zones generate income, and industrial zones have a maintenance cost. 
+
+4. Help me implement (no code) road connectivity. Zones should only contribute to population and income if they are adjacent to at least one road tile. 
+
+5. Help me implement a (no code) zone leveling system driven by player choice
+
+6. Add the following five gameplay systems:
+   a. RCI Demand Meter — three bars (Residential, Commercial, Industrial) showing what zone types the city currently needs based on the balance of existing zones.
+   b. Happiness stat — a 0–100 score that increases with commercial access and decreases with industrial pollution. Happiness acts as a multiplier on commercial income.
+   c. Time controls — pause, normal speed, and fast-forward buttons for the simulation tick. Space bar toggles pause, F sets fast mode.
+   d. Tile inspect panel — hovering any tile shows detailed info: zone type, level, terrain, road connection status, output per tick, and upgrade cost.
+   e. Event log — a panel showing the last five city events such as population milestones, low funds warnings, and zone level-ups.
+
+7. Display the placement cost of each zone type on its toolbar button. Also give industrial zones a meaningful role beyond just costing money: industrial tiles should act as a supply source that boosts commercial income. Without any industrial, commercial zones operate at reduced efficiency. The ideal ratio is roughly one industrial tile per two commercial tiles.
+
+8. Add services (schools, parks, fire stations), city naming via contenteditable, and a power grid using Manhattan distance radius. Add a tax rate slider. Show placement costs on toolbar buttons.
+
+9. Add more SimCity-like drop-in zone types: Small Park, Hospital, Police Station, Library, Stadium, Solar Farm, Wind Turbine. Add a crime mechanic where industrial zones generate crime and police stations reduce it. Crime is displayed in the HUD and reduces commercial income via a multiplier.
