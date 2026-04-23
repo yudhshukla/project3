@@ -4,7 +4,7 @@ I'm most proud of the procedural terrain generation + the isometric renderer. Th
 
 To run locally, open `frontend/index.html` and run `backend/app.py` after flask is installed. There are no secrets. The backend uses a local SQLite file `backend/city_data.db` which is created automatically on first run. 
 
-## Gameplay Controls
+### Gameplay Controls
 
 | Action | Control |
 |---|---|
