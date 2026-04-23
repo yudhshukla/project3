@@ -151,6 +151,8 @@ let crime      = 0;
 let taxRate    = 10;
 let powerRatio = 0;
 
+let currentCityId = null;
+
 const POP_MILESTONES  = [50, 100, 500, 1000, 5000];
 let reachedMilestones = new Set();
 
@@ -636,7 +638,7 @@ function drawGrid() {
       // ── Mountains: elevation-driven height, snow cap on peaks ──
       if (t === 'mountain' && zone === 'empty') {
         const frac     = Math.max(0, (elevation[row][col] - 0.82) / 0.18);
-        const mH       = Math.round(frac * 96) + 6;
+        const mH       = Math.round(frac * 120) + 6;
         const topColor = elevation[row][col] > 0.95 ? '#858585' : '#6a6969';
         drawLeftFace(sx, sy, '#525050', 1, mH);
         drawRightFace(sx, sy, '#424141', 1, mH);
@@ -1272,6 +1274,7 @@ function newMap() {
   crime             = 0;
   powerRatio        = 0;
   cars = [];
+  currentCityId = null;
   reachedMilestones = new Set();
   addEvent('New city started.');
   drawGrid();
@@ -1298,6 +1301,89 @@ window.addEventListener('resize', () => {
   resizeCanvas();
   drawGrid();
 });
+
+// ═══════════════════════════════════════════════════════════
+//  BACKEND & DATABASE FUNCTIONS
+// ═══════════════════════════════════════════════════════════
+
+// 1. Save or Update the City
+async function saveGameToBackend() {
+  const cityData = {
+    id: currentCityId, // Grabs the variable we put at the top of the file!
+    name: document.getElementById('city-name').textContent,
+    population: population,
+    money: money
+  };
+
+  try {
+    showToast("Saving...");
+    
+    const response = await fetch('http://127.0.0.1:5000/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cityData)
+    });
+    
+    const result = await response.json();
+    
+    // Catch the ID from Python and save it so we update next time instead of duplicating
+    if (result.id) currentCityId = result.id; 
+    
+    showToast(result.message); 
+    
+  } catch (error) {
+    console.error("Failed to save:", error);
+    showToast("Server error! Is Python running?");
+  }
+}
+
+// 2. Fetch and display the leaderboard in the UI
+async function showLeaderboard() {
+  const modal = document.getElementById('leaderboard-modal');
+  const content = document.getElementById('lb-content');
+  
+  // Show the modal immediately with a loading state
+  modal.style.display = 'flex';
+  content.innerHTML = "<div style='text-align:center; color:#aaa;'>Loading database...</div>";
+
+  try {
+    const response = await fetch('http://127.0.0.1:5000/leaderboard');
+    const cities = await response.json();
+    
+    if (cities.length === 0) {
+      content.innerHTML = "<div style='text-align:center; padding: 10px;'>No cities saved yet!</div>";
+      return;
+    }
+
+    // Generate the HTML for the rows
+    let html = "";
+    cities.forEach((city, index) => {
+      html += `
+        <div class="lb-row">
+          <span class="lb-rank">#${index + 1}</span>
+          <span class="lb-name">${city.name}</span>
+          <span class="lb-score">Pop: <span>${city.population}</span> | $${city.money}</span>
+        </div>
+      `;
+    });
+    
+    content.innerHTML = html;
+
+  } catch (error) {
+    console.error("Failed to load leaderboard:", error);
+    content.innerHTML = "<div style='text-align:center; color: #e53935; padding: 10px;'>Server error. Is Python running?</div>";
+  }
+}
+
+// 3. Attach the buttons
+document.getElementById('btn-save').addEventListener('click', saveGameToBackend);
+document.getElementById('btn-leaderboard').addEventListener('click', showLeaderboard);
+
+// Close the leaderboard modal
+document.getElementById('btn-close-lb').addEventListener('click', () => {
+  document.getElementById('leaderboard-modal').style.display = 'none';
+});
+
 
 
 // ═══════════════════════════════════════════════════════════
