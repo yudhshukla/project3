@@ -20,10 +20,10 @@ To run locally, open `frontend/index.html` and run `backend/app.py` after flask 
 
 Click a tab to expand it, then select a tool:
 
-- **Zones** — Residential, Commercial, Industrial, Road, Erase
-- **Parks** — Park, Small Park
-- **Safety** — Fire Station, Police Station, Hospital
-- **Culture** — School, Library, Stadium
-- **Power** — Power Plant, Solar Farm, Wind Turbine
+- **Zones**: Residential, Commercial, Industrial, Road, Erase
+- **Parks**: Park, Small Park
+- **Safety**: Fire Station, Police Station, Hospital
+- **Culture**: School, Library, Stadium
+- **Power**: Power Plant, Solar Farm, Wind Turbine
 
 
