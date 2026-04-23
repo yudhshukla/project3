@@ -1,23 +1,42 @@
 
-1. Set up a full-screen canvas grid for a 2D SimCity-style web game. The canvas should fill the entire browser window. Include a floating toolbar at the bottom center of the screen (Animal Crossing style) with zone placement tools: Erase, Residential, Commercial, Industrial, and Road. Add a small HUD panel in the top-left corner showing city stats, and a tile info panel in the top-right that updates on hover.
+1. Set up a full-screen canvas SimCity-style game with a floating bottom toolbar for zone tools (Erase, Residential, Commercial, Industrial, Road). Add a HUD panel top-left for city stats and a tile info panel top-right that updates on hover.
 
-2. Implement a procedural terrain generation system using value noise. When the map loads, generate smooth terrain across the grid with five terrain types: Water, Beach, Grass, Forest, and Mountain. Water and Mountain tiles should be unbuildable. Include a "New Map" button that regenerates the terrain. Explain how the noise algorithm works (smoothstep, lerp, bilinear interpolation, control grid).
+2. Add procedural terrain generation using value noise with five terrain types: Water, Beach, Grass, Forest, and Mountain. Include a New Map button to regenerate.
 
-3. Help me implement (no code) a city simulation tick that runs every second. The tick should count how many of each zone type the player has placed and update population and money accordingly. Residential zones grow population, commercial zones generate income, and industrial zones have a maintenance cost. 
+3. Teach me how to integrate a city simulation tick (no code) that counts placed zones and updates population and money each second. Residential grows population, commercial earns income, industrial costs maintenance.
 
-4. Help me implement (no code) road connectivity. Zones should only contribute to population and income if they are adjacent to at least one road tile. 
+4. Teach me how to integrate road connectivity (no code) so zones only contribute if adjacent to a road tile.
 
-5. Help me implement a (no code) zone leveling system driven by player choice
+5. Teach me how to integrate a zone leveling system (no code) driven by player right-click upgrades.
 
-6. Add the following five gameplay systems:
-   a. RCI Demand Meter — three bars (Residential, Commercial, Industrial) showing what zone types the city currently needs based on the balance of existing zones.
-   b. Happiness stat — a 0–100 score that increases with commercial access and decreases with industrial pollution. Happiness acts as a multiplier on commercial income.
-   c. Time controls — pause, normal speed, and fast-forward buttons for the simulation tick. Space bar toggles pause, F sets fast mode.
-   d. Tile inspect panel — hovering any tile shows detailed info: zone type, level, terrain, road connection status, output per tick, and upgrade cost.
-   e. Event log — a panel showing the last five city events such as population milestones, low funds warnings, and zone level-ups.
+6. Add RCI demand bars, a happiness stat, time controls (pause/normal/fast), a detailed tile inspect panel, and an event log showing the last five city events.
 
-7. Display the placement cost of each zone type on its toolbar button. Also give industrial zones a meaningful role beyond just costing money: industrial tiles should act as a supply source that boosts commercial income. Without any industrial, commercial zones operate at reduced efficiency. The ideal ratio is roughly one industrial tile per two commercial tiles.
+7. Show placement costs on toolbar buttons and make industrial zones boost commercial income as a supply multiplier.
 
-8. Add services (schools, parks, fire stations), city naming via contenteditable, and a power grid using Manhattan distance radius. Add a tax rate slider. Show placement costs on toolbar buttons.
+8. Add services (schools, parks, fire stations), city naming, a power grid with Manhattan-distance radius, and a tax rate slider.
 
-9. Add more SimCity-like drop-in zone types: Small Park, Hospital, Police Station, Library, Stadium, Solar Farm, Wind Turbine. Add a crime mechanic where industrial zones generate crime and police stations reduce it. Crime is displayed in the HUD and reduces commercial income via a multiplier.
+9. Add more zone types (Hospital, Police, Library, Stadium, Solar Farm, Wind Turbine, Small Park) and a crime mechanic where industrial generates crime and police reduce it.
+
+10. Group the toolbar into collapsible tabs so only the active category's tools are visible at once.
+
+11. Split the code into separate HTML, CSS, and JS files.
+
+12. Give me steps on how I can transition the game into an isometric view with a moveable camera, sky gradient, edge fog, and 3D-looking buildings with variable heights per level.
+
+13. Add mouse-drag panning (right-click drag) and 90-degree snap map rotation with [ and ] keys. Explain the rotation implementation at each step. 
+
+14. Fix rotation camera so the map stays centered after rotating, and add Ctrl+drag panning for Mac. Can you explain why dragging wasn't working before?
+
+15. Make forest tiles display four small isometric tree cubes with varying heights instead of a flat diamond.
+
+16. Make forest trees all dark green, give mountains elevation-based 3D heights with snow caps on peaks, and make water tiles visually lower than land with cliff faces on adjacent sand edges.
+
+17. Make the roads not take up the entire tile but instead 75% of it, and handle road turns and connections.
+
+18. How would you add a car animation similar to simcity that shows cars going down the road? Explain the steps to me. 
+
+19. Can you give me an outline of how to set up a backend database that will keep track of best cities through a leaderboard? I will fill in most of the code myself.
+
+20. How can we modify this so cities saved on the same run of the app rewrite the previous saved row?
+
+21. Can you outline the JS needed for me to make the leaderboard alert a part of the UI?
