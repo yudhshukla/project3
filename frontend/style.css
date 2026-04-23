@@ -1,0 +1,209 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body, html {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: monospace;
+}
+
+#grid-canvas { display: block; position: fixed; top: 0; left: 0; cursor: crosshair; }
+
+/* ── Shared HUD panel ── */
+.hud-panel {
+  position: fixed;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+  color: #eee;
+  font-size: 0.8rem;
+}
+
+/* ── Top-left: stats ── */
+#hud-stats {
+  top: 25px; left: 25px;
+  padding: 10px 16px;
+  line-height: 1.8;
+  pointer-events: none;
+  min-width: 175px;
+}
+
+/* City name: contenteditable — needs pointer-events to be clickable */
+#city-name {
+  font-size: 1rem; font-weight: bold; color: #fff; letter-spacing: 1px;
+  pointer-events: all;
+  cursor: text;
+  outline: none;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.2s;
+}
+#city-name:focus { border-bottom-color: rgba(255,255,255,0.4); }
+
+/* RCI demand bars */
+.demand-section { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
+.demand-row     { display: flex; align-items: center; gap: 6px; }
+.demand-label   { width: 10px; font-weight: bold; font-size: 0.72rem; }
+.demand-track   { flex: 1; height: 5px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+.demand-fill    { height: 100%; border-radius: 3px; transition: width 0.6s ease; width: 0%; }
+.demand-pct     { width: 30px; font-size: 0.68rem; color: #aaa; text-align: right; }
+
+/* Happiness bar */
+.happiness-row   { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.happiness-track { flex: 1; height: 5px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+.happiness-fill  {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(to right, #e74c3c 0%, #f39c12 50%, #2ecc71 100%);
+  transition: width 0.6s ease; width: 50%;
+}
+
+/* Tax slider */
+.tax-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+#tax-slider {
+  flex: 1; height: 4px;
+  accent-color: #fdd835;
+  cursor: pointer;
+  pointer-events: all;
+}
+
+/* Power indicator */
+.power-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.power-track { flex: 1; height: 5px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+.power-fill  { height: 100%; background: #fdd835; border-radius: 3px; transition: width 0.6s ease; width: 0%; }
+
+/* Crime indicator */
+.crime-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+.crime-track { flex: 1; height: 5px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+.crime-fill  { height: 100%; background: #e53935; border-radius: 3px; transition: width 0.6s ease; width: 0%; }
+
+/* ── Top-right: tile inspect ── */
+#hud-tile {
+  top: 25px; right: 25px;
+  padding: 10px 14px;
+  pointer-events: none;
+  min-width: 200px;
+  line-height: 1.7;
+}
+#hud-tile .tile-header { color: #fff; font-weight: bold; }
+#hud-tile .tile-row    { color: #aaa; font-size: 0.76rem; }
+#hud-tile .tile-row span { color: #eee; }
+
+/* ── Bottom-left: event log ── */
+#event-log {
+  bottom: 90px; left: 25px;
+  padding: 8px 12px;
+  min-width: 220px;
+  pointer-events: none;
+}
+#event-log .log-title { color: #aaa; font-size: 0.7rem; margin-bottom: 4px; letter-spacing: 1px; }
+.log-entry {
+  font-size: 0.72rem; color: #ccc; padding: 2px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  animation: fadeIn 0.3s ease;
+}
+.log-entry:last-child { border-bottom: none; }
+@keyframes fadeIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+
+/* ── Bottom-left: time controls ── */
+#time-controls {
+  bottom: 25px; left: 25px;
+  display: flex; gap: 6px; padding: 8px 12px;
+}
+.time-btn {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 8px; padding: 5px 10px;
+  color: #ccc; font-size: 0.85rem; cursor: pointer;
+  transition: background 0.15s;
+}
+.time-btn:hover  { background: rgba(255,255,255,0.15); }
+.time-btn.active { background: rgba(255,255,255,0.22); color: #fff; border-color: rgba(255,255,255,0.5); }
+
+/* ── Bottom toolbar shell ── */
+#toolbar {
+  position: fixed;
+  bottom: 24px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 0;
+  background: rgba(10,10,30,0.80);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+/* Tool tray — slides open above the group tabs */
+#tool-tray {
+  display: flex; gap: 8px; align-items: center; justify-content: center;
+  padding: 0 18px;
+  max-height: 0; overflow: hidden;
+  transition: max-height 0.25s ease, padding 0.25s ease;
+}
+#tool-tray.open {
+  max-height: 90px;
+  padding: 10px 18px 6px;
+}
+
+/* Group tab row */
+#group-tabs {
+  display: flex; gap: 4px; align-items: center;
+  padding: 8px 14px;
+}
+.group-tab {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: rgba(255,255,255,0.06);
+  border: 2px solid transparent; border-radius: 14px;
+  padding: 6px 12px; cursor: pointer; color: #aaa;
+  font-family: monospace; font-size: 0.7rem;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.group-tab .tab-icon { font-size: 1.1rem; line-height: 1; }
+.group-tab:hover  { background: rgba(255,255,255,0.12); color: #eee; }
+.group-tab.active {
+  border-color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.16);
+  color: #fff;
+}
+
+/* Individual tool buttons inside the tray */
+.tool-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: rgba(255,255,255,0.07);
+  border: 2px solid transparent; border-radius: 12px;
+  padding: 6px 10px; cursor: pointer; color: #ccc;
+  font-family: monospace; font-size: 0.72rem;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.tool-btn .swatch  { width: 16px; height: 16px; border-radius: 3px; }
+.tool-btn:hover    { background: rgba(255,255,255,0.14); transform: translateY(-2px); }
+.tool-btn.selected {
+  border-color: rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.18);
+  transform: translateY(-4px); color: #fff;
+}
+.tool-btn .key-hint { font-size: 0.62rem; color: rgba(255,255,255,0.35); }
+
+/* ── Bottom-right: new map ── */
+#btn-newmap {
+  position: fixed; bottom: 24px; right: 24px;
+  background: rgba(10,10,30,0.75);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 12px; padding: 10px 16px;
+  color: #ccc; font-family: monospace; font-size: 0.9rem;
+  cursor: pointer; backdrop-filter: blur(10px); transition: background 0.15s;
+}
+#btn-newmap:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+/* ── Toast ── */
+#toast {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(180,30,30,0.85);
+  border: 1px solid rgba(255,100,100,0.4);
+  border-radius: 12px; padding: 12px 24px;
+  color: #fff; font-size: 0.9rem; pointer-events: none;
+  backdrop-filter: blur(8px); opacity: 0; transition: opacity 0.3s ease;
+}
+#toast.visible { opacity: 1; }
