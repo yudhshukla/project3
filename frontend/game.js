@@ -129,11 +129,10 @@ function noiseToTerrain(v) {
 
 function generateTerrain(rows, cols) {
   const control = makeControlGrid(rows, cols, NOISE_SCALE);
-  return Array.from({ length: rows }, (_, r) =>
-    Array.from({ length: cols }, (_, c) =>
-      noiseToTerrain(sampleNoise(control, r, c, NOISE_SCALE))
-    )
+  const elevation = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => sampleNoise(control, r, c, NOISE_SCALE))
   );
+  return { terrain: elevation.map(row => row.map(noiseToTerrain)), elevation };
 }
 
 
@@ -141,12 +140,12 @@ function generateTerrain(rows, cols) {
 //  GAME STATE
 // ═══════════════════════════════════════════════════════════
 
-let terrain = generateTerrain(ROWS, COLS);
-let zones   = Array.from({ length: ROWS }, () => Array(COLS).fill('empty'));
-let levels  = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+let { terrain, elevation } = generateTerrain(ROWS, COLS);
+let zones                  = Array.from({ length: ROWS }, () => Array(COLS).fill('empty'));
+let levels                 = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
 
 let population = 0;
-let money      = 1000;
+let money      = 1000000;
 let happiness  = 50;
 let crime      = 0;
 let taxRate    = 10;
@@ -195,6 +194,84 @@ function computePowerGrid() {
   return powered;
 }
 
+// ═══════════════════════════════════════════════════════════
+//  CARS & TRAFFIC
+// ═══════════════════════════════════════════════════════════
+
+let cars = [];
+const CAR_COLORS = ['#e53935', '#1e88e5', '#43a047', '#fdd835', '#8e24aa', '#ffffff', '#212121'];
+
+function getRoadNeighbors(r, c) {
+  const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  const neighbors = [];
+  dirs.forEach(([dr, dc]) => {
+    const nr = r + dr, nc = c + dc;
+    if (inBounds(nr, nc) && zones[nr][nc] === 'road') neighbors.push({ r: nr, c: nc });
+  });
+  return neighbors;
+}
+
+function spawnCar() {
+  // Find all roads
+  const roads = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (zones[r][c] === 'road') roads.push({ r, c });
+    }
+  }
+  if (roads.length === 0) return;
+
+  // Pick a random road and find where it connects
+  const start = roads[Math.floor(Math.random() * roads.length)];
+  const neighbors = getRoadNeighbors(start.r, start.c);
+  if (neighbors.length === 0) return;
+
+  const next = neighbors[Math.floor(Math.random() * neighbors.length)];
+
+  cars.push({
+    r: start.r, c: start.c,
+    nr: next.r, nc: next.c,
+    progress: 0,
+    speed: 0.015 + Math.random() * 0.01, // random speeds
+    color: CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)]
+  });
+}
+
+function updateCars() {
+  if (currentSpeed === 'pause') return;
+  const speedMult = currentSpeed === 'fast' ? 2.5 : 1;
+
+  for (let i = cars.length - 1; i >= 0; i--) {
+    let car = cars[i];
+    car.progress += car.speed * speedMult;
+
+    // When a car reaches the next tile
+    if (car.progress >= 1) {
+      const prevR = car.r; const prevC = car.c;
+      car.r = car.nr; car.c = car.nc;
+      car.progress = 0;
+
+      // Despawn if the road was deleted
+      if (zones[car.r][car.c] !== 'road') {
+        cars.splice(i, 1);
+        continue;
+      }
+
+      // Pick next destination (try not to instantly U-turn unless it's a dead end)
+      const neighbors = getRoadNeighbors(car.r, car.c);
+      let options = neighbors.filter(n => n.r !== prevR || n.c !== prevC);
+      if (options.length === 0) options = neighbors; 
+
+      if (options.length === 0) {
+        cars.splice(i, 1); // Completely isolated, delete car
+        continue;
+      }
+
+      const next = options[Math.floor(Math.random() * options.length)];
+      car.nr = next.r; car.nc = next.c;
+    }
+  }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  DRAWING
@@ -214,7 +291,8 @@ function toScreen(row, col) {
   };
 }
 
-const WALL_H = 14; // pixel height of building side faces
+const WALL_H      = 14; // pixel height of building side faces
+const WATER_DEPTH =  8; // pixels water sits below land level
 
 // Reusable path for the top diamond (no fill/stroke — caller does that)
 function diamondPath(sx, sy) {
@@ -240,54 +318,335 @@ function drawDiamond(sx, sy, color, alpha = 1, darken = 0) {
   ctx.globalAlpha = 1;
 }
 
-// Draws the left wall face (south-west, lighter shade)
-function drawLeftFace(sx, sy, color, alpha = 1) {
+// Left wall face. sy is the TOP of the building (already shifted up by wallH).
+function drawLeftFace(sx, sy, color, alpha = 1, wallH = WALL_H) {
+  const top = sy - wallH;  // top of the shifted diamond
   ctx.beginPath();
-  ctx.moveTo(sx - TILE_W/2, sy + TILE_H/2);
-  ctx.lineTo(sx,             sy + TILE_H);
-  ctx.lineTo(sx,             sy + TILE_H + WALL_H);
-  ctx.lineTo(sx - TILE_W/2, sy + TILE_H/2 + WALL_H);
+  ctx.moveTo(sx - TILE_W/2, top + TILE_H/2);
+  ctx.lineTo(sx,             top + TILE_H);
+  ctx.lineTo(sx,             top + TILE_H + wallH);
+  ctx.lineTo(sx - TILE_W/2, top + TILE_H/2 + wallH);
   ctx.closePath();
   ctx.globalAlpha = alpha;
   ctx.fillStyle   = color;
   ctx.fill();
-  // darken the left face slightly
   ctx.globalAlpha = 0.25;
   ctx.fillStyle   = '#000';
   ctx.fill();
   ctx.globalAlpha = 1;
 }
 
-// Draws the right wall face (south-east, darker shade)
-function drawRightFace(sx, sy, color, alpha = 1) {
+// Right wall face.
+function drawRightFace(sx, sy, color, alpha = 1, wallH = WALL_H) {
+  const top = sy - wallH;
   ctx.beginPath();
-  ctx.moveTo(sx,             sy + TILE_H);
-  ctx.lineTo(sx + TILE_W/2, sy + TILE_H/2);
-  ctx.lineTo(sx + TILE_W/2, sy + TILE_H/2 + WALL_H);
-  ctx.lineTo(sx,             sy + TILE_H + WALL_H);
+  ctx.moveTo(sx,             top + TILE_H);
+  ctx.lineTo(sx + TILE_W/2, top + TILE_H/2);
+  ctx.lineTo(sx + TILE_W/2, top + TILE_H/2 + wallH);
+  ctx.lineTo(sx,             top + TILE_H + wallH);
   ctx.closePath();
   ctx.globalAlpha = alpha;
   ctx.fillStyle   = color;
   ctx.fill();
-  // darken the right face more — simulates shadow
   ctx.globalAlpha = 0.45;
   ctx.fillStyle   = '#000';
   ctx.fill();
   ctx.globalAlpha = 1;
 }
 
+// Scaled versions for zone buildings — 70% size, inset within tile
+function diamondPathScaled(sx, sy, scale = 0.7) {
+  const w = TILE_W * scale;
+  const h = TILE_H * scale;
+  ctx.beginPath();
+  ctx.moveTo(sx,      sy);
+  ctx.lineTo(sx + w/2, sy + h/2);
+  ctx.lineTo(sx,      sy + h);
+  ctx.lineTo(sx - w/2, sy + h/2);
+  ctx.closePath();
+}
+
+function drawDiamondScaled(sx, sy, color, alpha = 1, darken = 0, scale = 0.7) {
+  diamondPathScaled(sx, sy, scale);
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle   = color;
+  ctx.fill();
+  if (darken > 0) {
+    ctx.globalAlpha = darken;
+    ctx.fillStyle   = '#000';
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawLeftFaceScaled(sx, sy, color, alpha = 1, wallH = WALL_H, scale = 0.7) {
+  const w = TILE_W * scale;
+  const h = TILE_H * scale;
+  const top = sy - wallH;
+  ctx.beginPath();
+  ctx.moveTo(sx - w/2, top + h/2);
+  ctx.lineTo(sx,       top + h);
+  ctx.lineTo(sx,       top + h + wallH);
+  ctx.lineTo(sx - w/2, top + h/2 + wallH);
+  ctx.closePath();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle   = color;
+  ctx.fill();
+  ctx.globalAlpha = 0.25;
+  ctx.fillStyle   = '#000';
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+function drawRightFaceScaled(sx, sy, color, alpha = 1, wallH = WALL_H, scale = 0.7) {
+  const w = TILE_W * scale;
+  const h = TILE_H * scale;
+  const top = sy - wallH;
+  ctx.beginPath();
+  ctx.moveTo(sx,       top + h);
+  ctx.lineTo(sx + w/2, top + h/2);
+  ctx.lineTo(sx + w/2, top + h/2 + wallH);
+  ctx.lineTo(sx,       top + h + wallH);
+  ctx.closePath();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle   = color;
+  ctx.fill();
+  ctx.globalAlpha = 0.45;
+  ctx.fillStyle   = '#000';
+  ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+// Roads: 3D isometric strip from left edge to right edge (horizontally across middle)
+// Roads: dynamic isometric tile that connects to neighboring roads
+// Roads: thinner isometric paths that connect and leave terrain visible
+function drawRoad(sx, sy, row, col, alpha = 1) {
+  const roadThick = 2; // Height of the road curb
+  const cy = sy + TILE_H / 2; // Exact center of the tile
+  
+  // Check neighbors
+  const hasN = inBounds(row - 1, col) && zones[row - 1][col] === 'road'; // Top-Right
+  const hasS = inBounds(row + 1, col) && zones[row + 1][col] === 'road'; // Bottom-Left
+  const hasW = inBounds(row, col - 1) && zones[row][col - 1] === 'road'; // Top-Left
+  const hasE = inBounds(row, col + 1) && zones[row][col + 1] === 'road'; // Bottom-Right
+
+  ctx.globalAlpha = alpha;
+
+  // Width factor: 0.22 means the road takes up 44% of the tile width
+  // leaving 28% of the terrain visible on each side.
+  const f = 0.22; 
+
+  // Helper to draw a specific rectangular section of the road in grid space
+  const drawPoly = (dr1, dr2, dc1, dc2, yOffset, color) => {
+    ctx.fillStyle = color;
+    const p = [
+      {dr: dr1, dc: dc1}, {dr: dr1, dc: dc2},
+      {dr: dr2, dc: dc2}, {dr: dr2, dc: dc1}
+    ];
+    ctx.beginPath();
+    p.forEach(({dr, dc}, i) => {
+      // Convert local grid offsets to screen space
+      const px = sx + (dc - dr) * (TILE_W / 2);
+      const py = cy + yOffset + (dc + dr) * (TILE_H / 2);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  // Helper to draw all the connected parts
+  const drawRoadParts = (yOffset, color) => {
+    drawPoly(-f, f, -f, f, yOffset, color); // Center intersection
+    if (hasN) drawPoly(-0.5, -f, -f, f, yOffset, color); // Arm to Top-Right
+    if (hasS) drawPoly(f, 0.5, -f, f, yOffset, color);   // Arm to Bottom-Left
+    if (hasW) drawPoly(-f, f, -0.5, -f, yOffset, color); // Arm to Top-Left
+    if (hasE) drawPoly(-f, f, f, 0.5, yOffset, color);   // Arm to Bottom-Right
+  };
+
+  // 1. Draw the base/curb (shifted down by roadThick)
+  drawRoadParts(0, '#444');
+  
+  // 2. Draw the top asphalt surface
+  drawRoadParts(-roadThick, '#6b6b6b');
+
+  // --- Dashed Lines ---
+  const topY = cy - roadThick;
+  ctx.strokeStyle = '#fbc02d';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  
+  // Helper to get screen point for center lines
+  const pt = (dr, dc) => ({
+    x: sx + (dc - dr) * (TILE_W / 2),
+    y: topY + (dc + dr) * (TILE_H / 2)
+  });
+
+  const cPt = pt(0, 0);
+  
+  if (hasN) { const p = pt(-0.5, 0); ctx.moveTo(cPt.x, cPt.y); ctx.lineTo(p.x, p.y); }
+  if (hasS) { const p = pt(0.5, 0); ctx.moveTo(cPt.x, cPt.y); ctx.lineTo(p.x, p.y); }
+  if (hasW) { const p = pt(0, -0.5); ctx.moveTo(cPt.x, cPt.y); ctx.lineTo(p.x, p.y); }
+  if (hasE) { const p = pt(0, 0.5); ctx.moveTo(cPt.x, cPt.y); ctx.lineTo(p.x, p.y); }
+  
+  ctx.stroke();
+  ctx.setLineDash([]); // Reset so we don't mess up other drawings
+
+  // Center dot if isolated
+  if (!hasN && !hasS && !hasE && !hasW) {
+    ctx.fillStyle = '#fbc02d';
+    ctx.beginPath();
+    ctx.arc(sx, topY, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  ctx.globalAlpha = 1;
+}
+// 4 small isometric tree cubes on a forest tile, height varies by tile position.
+function drawForestTrees(sx, sy, row, col) {
+  const SW = TILE_W / 2, SH = TILE_H / 2;
+  const TRUNK  = '#1e5d21';
+  const CANOPY = 'rgb(29, 96, 34)';
+
+  // Sub-tile [dr, dc] offsets — isometric painter order (low depth → high depth)
+  const subs = [[0, 0], [0, 0.5], [0.5, 0], [0.5, 0.5]];
+
+  // Deterministic height per tree: 8–22px
+  const seed = (row + 1) * 97 + (col + 1) * 31;
+
+  subs.forEach(([dr, dc], i) => {
+    const tx = sx + (dc - dr) * TILE_W / 2;
+    const ty = sy + (dc + dr) * TILE_H / 2;
+    const h  = 8 + ((seed * (i + 1) * 7 + i * 19) % 15);
+
+    // Left trunk face
+    ctx.beginPath();
+    ctx.moveTo(tx - SW/2, ty - h + SH/2);
+    ctx.lineTo(tx,         ty - h + SH);
+    ctx.lineTo(tx,         ty + SH);
+    ctx.lineTo(tx - SW/2, ty + SH/2);
+    ctx.closePath();
+    ctx.globalAlpha = 1; ctx.fillStyle = TRUNK; ctx.fill();
+    ctx.globalAlpha = 0.25; ctx.fillStyle = '#000'; ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Right trunk face
+    ctx.beginPath();
+    ctx.moveTo(tx,         ty - h + SH);
+    ctx.lineTo(tx + SW/2, ty - h + SH/2);
+    ctx.lineTo(tx + SW/2, ty + SH/2);
+    ctx.lineTo(tx,         ty + SH);
+    ctx.closePath();
+    ctx.globalAlpha = 1; ctx.fillStyle = TRUNK; ctx.fill();
+    ctx.globalAlpha = 0.45; ctx.fillStyle = '#000'; ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Canopy top diamond
+    ctx.beginPath();
+    ctx.moveTo(tx,         ty - h);
+    ctx.lineTo(tx + SW/2, ty - h + SH/2);
+    ctx.lineTo(tx,         ty - h + SH);
+    ctx.lineTo(tx - SW/2, ty - h + SH/2);
+    ctx.closePath();
+    ctx.fillStyle = CANOPY;
+    ctx.fill();
+  });
+}
+
+// Fades the far edges of the map into sky.
+// In isometric view the far horizon is at the TOP — so fog is strongest there.
+function drawEdgeFog() {
+  const w = canvas.width, h = canvas.height;
+
+  // Top: this is the horizon/far edge — fade from opaque sky down into the map
+  const top = ctx.createLinearGradient(0, 0, 0, h * 0.45);
+  top.addColorStop(0,   'rgba(26,42,74,1)');   // fully opaque deep sky at very top
+  top.addColorStop(0.5, 'rgba(46,107,158,0.5)');
+  top.addColorStop(1,   'rgba(46,107,158,0)');  // transparent by mid-screen
+  ctx.fillStyle = top;
+  ctx.fillRect(0, 0, w, h);
+
+  // Left edge
+  const left = ctx.createLinearGradient(0, 0, w * 0.2, 0);
+  left.addColorStop(0, 'rgba(46,107,158,1)');
+  left.addColorStop(1, 'rgba(46,107,158,0)');
+  ctx.fillStyle = left;
+  ctx.fillRect(0, 0, w, h);
+
+  // Right edge
+  const right = ctx.createLinearGradient(w, 0, w * 0.8, 0);
+  right.addColorStop(0, 'rgba(46,107,158,1)');
+  right.addColorStop(1, 'rgba(46,107,158,0)');
+  ctx.fillStyle = right;
+  ctx.fillRect(0, 0, w, h);
+}
+
+function drawSky() {
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.7);
+  grad.addColorStop(0,   '#1a2a4a');  // deep sky at top
+  grad.addColorStop(0.5, '#2e6b9e');  // mid blue
+  grad.addColorStop(1,   '#5ba3c9');  // horizon haze
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
 function drawGrid() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawSky();
   const powered = computePowerGrid();
 
   for (let row = 0; row < ROWS; row++) {
     for (let col = 0; col < COLS; col++) {
       const { sx, sy } = toScreen(row, col);
-      const terrainColor = TERRAIN[terrain[row][col]].color;
-      const zone = zones[row][col];
+      const t           = terrain[row][col];
+      const terrainColor = TERRAIN[t].color;
+      const zone        = zones[row][col];
+      const isWater     = t === 'water';
+      const wOff        = isWater ? WATER_DEPTH : 0;
 
-      // ── Terrain top face (always flat, no walls) ──
-      drawDiamond(sx, sy, terrainColor);
+      // ── Terrain top face (water sits lower) ──
+      drawDiamond(sx, sy + wOff, terrainColor);
+
+      // ── Cliff faces: land edges that border water ──
+      if (!isWater) {
+        if (inBounds(row + 1, col) && terrain[row + 1][col] === 'water') {
+          ctx.beginPath();
+          ctx.moveTo(sx - TILE_W/2, sy + TILE_H/2);
+          ctx.lineTo(sx,             sy + TILE_H);
+          ctx.lineTo(sx,             sy + TILE_H + WATER_DEPTH);
+          ctx.lineTo(sx - TILE_W/2, sy + TILE_H/2 + WATER_DEPTH);
+          ctx.closePath();
+          ctx.fillStyle = terrainColor; ctx.fill();
+          ctx.globalAlpha = 0.3; ctx.fillStyle = '#000'; ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+        if (inBounds(row, col + 1) && terrain[row][col + 1] === 'water') {
+          ctx.beginPath();
+          ctx.moveTo(sx + TILE_W/2, sy + TILE_H/2);
+          ctx.lineTo(sx,             sy + TILE_H);
+          ctx.lineTo(sx,             sy + TILE_H + WATER_DEPTH);
+          ctx.lineTo(sx + TILE_W/2, sy + TILE_H/2 + WATER_DEPTH);
+          ctx.closePath();
+          ctx.fillStyle = terrainColor; ctx.fill();
+          ctx.globalAlpha = 0.45; ctx.fillStyle = '#000'; ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      // ── Mountains: elevation-driven height, snow cap on peaks ──
+      if (t === 'mountain' && zone === 'empty') {
+        const frac     = Math.max(0, (elevation[row][col] - 0.82) / 0.18);
+        const mH       = Math.round(frac * 96) + 6;
+        const topColor = elevation[row][col] > 0.95 ? '#858585' : '#6a6969';
+        drawLeftFace(sx, sy, '#525050', 1, mH);
+        drawRightFace(sx, sy, '#424141', 1, mH);
+        drawDiamond(sx, sy - mH, topColor, 1);
+      }
+
+      // ── Forest trees (4 small cubes, only when no zone placed on top) ──
+      if (t === 'forest' && zone === 'empty') {
+        drawForestTrees(sx, sy, row, col);
+      }
 
       if (zone !== 'empty') {
         const connected = isConnectedToRoad(row, col);
@@ -299,35 +658,69 @@ function drawGrid() {
           alpha = 0.6;
         }
 
-        // ── Zone side faces (give the 3D box look) ──
-        if (zone !== 'road') {
-          drawLeftFace(sx, sy, zoneColor, alpha);
-          drawRightFace(sx, sy, zoneColor, alpha);
-        }
+        // ── Roads: special handling ──
+        if (zone === 'road') {
+          drawRoad(sx, sy, row, col, alpha);
+        } else {
+          // ── Zone side faces — height scales with level ──
+          // Base height varies by zone type; each level adds 12px
+          const BASE_H = { residential: 10, commercial: 14, industrial: 8 };
+          const baseH  = BASE_H[zone] ?? 10;
+          const wallH  = baseH + (levels[row][col] || 0) * 12;
 
-        // ── Zone top face (slightly darkened if disconnected) ──
-        drawDiamond(sx, sy, zoneColor, alpha, connected ? 0 : 0.15);
+          if (wallH > 0) {
+            drawLeftFaceScaled(sx, sy, zoneColor, alpha, wallH);
+            drawRightFaceScaled(sx, sy, zoneColor, alpha, wallH);
+          }
 
-        // Icon or level number centered on top face
-        ctx.fillStyle    = 'rgba(255,255,255,0.95)';
-        ctx.font         = 'bold 10px monospace';
-        ctx.textAlign    = 'center';
-        ctx.textBaseline = 'middle';
+          // Top face sits on top of the walls — shift it up by wallH
+          drawDiamondScaled(sx, sy - wallH, zoneColor, alpha, connected ? 0 : 0.15);
 
-        if (SERVICE_ICONS[zone]) {
-          ctx.fillText(SERVICE_ICONS[zone], sx, sy + TILE_H / 2);
-        } else if (zone !== 'road') {
-          ctx.fillText(levels[row][col] || '0', sx, sy + TILE_H / 2);
+          // Icon centered on top face
+          ctx.fillStyle    = 'rgba(255,255,255,0.95)';
+          ctx.font         = 'bold 10px monospace';
+          ctx.textAlign    = 'center';
+          ctx.textBaseline = 'middle';
+
+          if (SERVICE_ICONS[zone]) {
+            ctx.fillText(SERVICE_ICONS[zone], sx, sy - wallH + (TILE_H * 0.7) / 2);
+          }
         }
       }
 
       // ── Diamond border outline ──
-      diamondPath(sx, sy);
+      diamondPath(sx, sy + wOff);
       ctx.strokeStyle = 'rgba(0,0,0,0.2)';
       ctx.lineWidth   = 0.5;
       ctx.stroke();
+
+      // ── DRAW CARS ──
+      cars.forEach(car => {
+        // Depth sort: link the car to the tile it is currently closest to
+        const sortR = Math.round(car.r + (car.nr - car.r) * car.progress);
+        const sortC = Math.round(car.c + (car.nc - car.c) * car.progress);
+        
+        if (sortR === row && sortC === col) {
+          const start = toScreen(car.r, car.c);
+          const end   = toScreen(car.nr, car.nc);
+          
+          // Interpolate exact pixel position
+          const cx = start.sx + (end.sx - start.sx) * car.progress;
+          const cy = (start.sy + TILE_H/2) + ((end.sy - start.sy) * car.progress);
+          
+          const carBase = cy - 2; // Float slightly above the road
+          const carH = 5;         // Height of the little car block
+          
+          // Draw tiny 3D isometric car
+          drawLeftFaceScaled(cx, carBase, car.color, 1, carH, 0.16);
+          drawRightFaceScaled(cx, carBase, car.color, 1, carH, 0.16);
+          drawDiamondScaled(cx, carBase - carH, car.color, 1, 0, 0.16);
+        }
+      });
     }
   }
+
+  drawEdgeFog();
 }
 
 
@@ -412,6 +805,8 @@ window.addEventListener('keydown', e => {
   if (e.key === 'r' || e.key === 'R') newMap();
   if (e.key === ' ') { e.preventDefault(); togglePause(); }
   if (e.key === 'f' || e.key === 'F') setTickSpeed('fast');
+  if (e.key === '[') rotateCCW();
+  if (e.key === ']') rotateCW();
 });
 
 
@@ -542,6 +937,17 @@ document.getElementById('btn-fast').addEventListener('click',   () => setTickSpe
 
 
 // ═══════════════════════════════════════════════════════════
+//  CAMERA HELPERS
+// ═══════════════════════════════════════════════════════════
+
+// Centers the isometric grid horizontally and puts the top vertex near the top.
+function centerCamera() {
+  cameraX = canvas.width / 2 - (COLS - ROWS) * (TILE_W / 4);
+  cameraY = Math.max(TILE_H * 2, canvas.height * 0.1);
+}
+
+
+// ═══════════════════════════════════════════════════════════
 //  MOUSE INTERACTION
 // ═══════════════════════════════════════════════════════════
 
@@ -549,6 +955,7 @@ let isMouseDown = false;
 let isPanning   = false;
 let lastPanX    = 0;
 let lastPanY    = 0;
+let panMoved    = false;  // distinguishes drag (pan) from click (level up)
 
 function pixelToTile(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
@@ -587,18 +994,28 @@ function paintTile(clientX, clientY) {
   updateHUD();
 }
 
-canvas.addEventListener('contextmenu', e => { e.preventDefault(); levelUpZone(e.clientX, e.clientY); });
+// Right-click or Ctrl+click or middle-click: drag = pan, click = level up
+canvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (!panMoved) levelUpZone(e.clientX, e.clientY);
+});
 
 canvas.addEventListener('mousedown', e => {
-  if (e.button === 0) { isMouseDown = true; paintTile(e.clientX, e.clientY); }
-  if (e.button === 1) { isPanning = true; lastPanX = e.clientX; lastPanY = e.clientY; e.preventDefault(); }
+  const isPanGesture = e.button === 2 || e.button === 1 || (e.button === 0 && e.ctrlKey);
+  if (isPanGesture) {
+    isPanning = true; panMoved = false; lastPanX = e.clientX; lastPanY = e.clientY;
+  } else if (e.button === 0) {
+    isMouseDown = true; paintTile(e.clientX, e.clientY);
+  }
 });
 
 canvas.addEventListener('mousemove', e => {
-  // Pan camera on middle-click drag
   if (isPanning) {
-    cameraX += e.clientX - lastPanX;
-    cameraY += e.clientY - lastPanY;
+    const dx = e.clientX - lastPanX;
+    const dy = e.clientY - lastPanY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) panMoved = true;
+    cameraX += dx;
+    cameraY += dy;
     lastPanX = e.clientX;
     lastPanY = e.clientY;
     drawGrid();
@@ -649,9 +1066,55 @@ canvas.addEventListener('mousemove', e => {
 });
 
 window.addEventListener('mouseup', e => {
-  if (e.button === 0) isMouseDown = false;
-  if (e.button === 1) isPanning   = false;
+  if (e.button === 0) { isMouseDown = false; if (isPanning) isPanning = false; }
+  if (e.button === 1 || e.button === 2) isPanning = false;
 });
+
+
+// ═══════════════════════════════════════════════════════════
+//  MAP ROTATION
+//
+//  Physically transposes the grid arrays so all existing code
+//  (pixelToTile, simulateTick, drawGrid) works unchanged.
+//  After rotation ROWS and COLS swap.
+// ═══════════════════════════════════════════════════════════
+
+function rotateGridCW(grid, rows, cols) {
+  // new grid is cols×rows; new[newR][newC] = old[rows-1-newC][newR]
+  return Array.from({ length: cols }, (_, newR) =>
+    Array.from({ length: rows }, (_, newC) => grid[rows - 1 - newC][newR])
+  );
+}
+
+function rotateGridCCW(grid, rows, cols) {
+  // new[newR][newC] = old[newC][cols-1-newR]
+  return Array.from({ length: cols }, (_, newR) =>
+    Array.from({ length: rows }, (_, newC) => grid[newC][cols - 1 - newR])
+  );
+}
+
+function rotateCW() {
+  terrain   = rotateGridCW(terrain,   ROWS, COLS);
+  elevation = rotateGridCW(elevation, ROWS, COLS);
+  zones     = rotateGridCW(zones,     ROWS, COLS);
+  levels    = rotateGridCW(levels,    ROWS, COLS);
+  [ROWS, COLS] = [COLS, ROWS];
+  centerCamera();
+  drawGrid();
+}
+
+function rotateCCW() {
+  terrain   = rotateGridCCW(terrain,   ROWS, COLS);
+  elevation = rotateGridCCW(elevation, ROWS, COLS);
+  zones     = rotateGridCCW(zones,     ROWS, COLS);
+  levels    = rotateGridCCW(levels,    ROWS, COLS);
+  [ROWS, COLS] = [COLS, ROWS];
+  centerCamera();
+  drawGrid();
+}
+
+document.getElementById('btn-rotate-ccw').addEventListener('click', rotateCCW);
+document.getElementById('btn-rotate-cw').addEventListener('click',  rotateCW);
 
 
 // ═══════════════════════════════════════════════════════════
@@ -767,6 +1230,12 @@ function simulateTick() {
   }
 
   if (money < 200 && money > 0) addEvent(`⚠ Low funds! $${money} left.`);
+
+  // Spawn traffic based on population (always at least 1 if roads exist)
+  const targetCars = Math.min(40, Math.floor(population / 10) + 1);
+  if (cars.length < targetCars && Math.random() > 0.3) {
+    spawnCar();
+  } // <-- This is the end of simulateTick()
 }
 
 
@@ -794,7 +1263,7 @@ function updateHUD() {
 // ═══════════════════════════════════════════════════════════
 
 function newMap() {
-  terrain           = generateTerrain(ROWS, COLS);
+  ({ terrain, elevation } = generateTerrain(ROWS, COLS));
   zones             = Array.from({ length: ROWS }, () => Array(COLS).fill('empty'));
   levels            = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
   population        = 0;
@@ -802,6 +1271,7 @@ function newMap() {
   happiness         = 50;
   crime             = 0;
   powerRatio        = 0;
+  cars = [];
   reachedMilestones = new Set();
   addEvent('New city started.');
   drawGrid();
@@ -823,7 +1293,7 @@ window.addEventListener('resize', () => {
   while (levels.length < newRows) levels.push(Array(newCols).fill(0));
   zones.forEach(row  => { while (row.length < newCols) row.push('empty'); });
   levels.forEach(row => { while (row.length < newCols) row.push(0); });
-  if (newCols > COLS || newRows > ROWS) terrain = generateTerrain(newRows, newCols);
+  if (newCols > COLS || newRows > ROWS) ({ terrain, elevation } = generateTerrain(newRows, newCols));
   COLS = newCols; ROWS = newRows;
   resizeCanvas();
   drawGrid();
@@ -834,12 +1304,16 @@ window.addEventListener('resize', () => {
 //  INIT
 // ═══════════════════════════════════════════════════════════
 
-// Center the map: row 0 col 0 starts at top-center of screen
-cameraX = canvas.width / 2;
-cameraY = TILE_H * 2;
-
+centerCamera();
 addEvent('New city started.');
-drawGrid();
 updateHUD();
 updateDemandBars(0, 0, 0);
 setTickSpeed('normal');
+
+// Smooth continuous render loop
+function animate() {
+  requestAnimationFrame(animate);
+  updateCars();
+  drawGrid();
+}
+animate();
